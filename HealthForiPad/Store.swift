@@ -89,16 +89,46 @@ final class DashboardStore {
     var visible: [DayPoint] {
         let w = window
         let n = effectiveRollingDays
-        return days.values.filter { $0.date >= w.start && $0.date <= w.end }.sorted { $0.date < $1.date }
-            .map { p in
-                var p = p
-                // trailing rolling averages (resting HR needs ≥3 readings, the sparser body measurements ≥2)
-                for (src, dst, minCount) in [(Field.rhr, Field.rhrAvg, 3), (.weight, .weightAvg, 2), (.bodyFat, .bodyFatAvg, 2), (.muscleMass, .muscleAvg, 2)] {
-                    let vals = (0..<n).compactMap { days[Cal.add(-$0, to: p.date)]?[src] }
-                    if vals.count >= minCount { p.values[dst] = vals.reduce(0, +) / Double(vals.count) }
-                }
-                return p
+        let inRange = days.values.filter { $0.date >= w.start && $0.date <= w.end }.sorted { $0.date < $1.date }
+        let trends = bodyTrends(window: n)
+        return inRange.map { p in
+            var p = p
+            // trailing rolling average of resting HR (needs ≥3 readings)
+            let vals = (0..<n).compactMap { days[Cal.add(-$0, to: p.date)]?[.rhr] }
+            if vals.count >= 3 { p.values[.rhrAvg] = vals.reduce(0, +) / Double(vals.count) }
+            // smoothed body trends (only on days with a measurement)
+            if let t = trends.weight[p.date] { p.values[.weightTrend] = t }
+            if let t = trends.fat[p.date] { p.values[.fatMassTrend] = t }
+            if let t = trends.lean[p.date] { p.values[.leanMassTrend] = t }
+            if let t = trends.muscle[p.date] { p.values[.muscleTrend] = t }
+            return p
+        }
+    }
+
+    /// Exponentially weighted trends ("trend weight"): smooths daily water/scale noise much better than a plain average.
+    /// Time-aware, so measurements every 2–3 days are handled correctly. Smoothing follows the trend-window setting.
+    private func bodyTrends(window n: Int) -> (weight: [Date: Double], fat: [Date: Double], lean: [Date: Double], muscle: [Date: Double]) {
+        let alpha = 2.0 / (Double(n) + 1)
+        let all = days.values.sorted { $0.date < $1.date }
+        func ewma(_ pts: [(Date, Double)]) -> [Date: Double] {
+            var out: [Date: Double] = [:]
+            var prev: Date?
+            var t = 0.0
+            for (d, v) in pts {
+                if let pd = prev {
+                    let gap = max(1, Cal.cal.dateComponents([.day], from: pd, to: d).day ?? 1)
+                    t += (1 - pow(1 - alpha, Double(gap))) * (v - t)
+                } else { t = v }
+                out[d] = t; prev = d
             }
+            return out
+        }
+        var fatPts: [(Date, Double)] = [], leanPts: [(Date, Double)] = []
+        for p in all {
+            if let w = p[.weight], let bf = p[.bodyFat] { let fat = w * bf / 100; fatPts.append((p.date, fat)); leanPts.append((p.date, w - fat)) }
+        }
+        return (ewma(all.compactMap { p in p[.weight].map { (p.date, $0) } }), ewma(fatPts), ewma(leanPts),
+                ewma(all.compactMap { p in p[.muscleMass].map { (p.date, $0) } }))
     }
 
     func setRange(_ r: TimeRange) {

@@ -24,7 +24,7 @@ struct SettingsView: View {
                     Stepper(value: $store.sleepGoal, in: 5...10, step: 0.25) {
                         Text("Sleep goal: \(Field.sleepHours.format(store.sleepGoal))")
                     }
-                    Picker("Resting HR trend line", selection: $store.rollingWindow) {
+                    Picker("Trend lines (resting HR, weight)", selection: $store.rollingWindow) {
                         Text("Auto (by range)").tag(0)
                         ForEach([7, 14, 21, 28], id: \.self) { Text("\($0)-day average").tag($0) }
                     }

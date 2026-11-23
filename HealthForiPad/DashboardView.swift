@@ -103,10 +103,9 @@ struct DashboardView: View {
         let pad: CGFloat = 14, gap: CGFloat = 12
         let statusH: CGFloat = 34
         @ViewBuilder func card(_ c: Card, _ h: CGFloat) -> some View {
-            if !c.panels.isEmpty {
-                StackedChartCard(title: c.title, icon: c.icon, panels: c.panels, days: days, range: store.range,
-                                 window: store.window, selected: $store.selected,
-                                 emptyNote: "No data from Garmin for this period.")
+            if c.bodyComp {
+                BodyCompositionCard(days: days, range: store.range, window: store.window,
+                                    selected: $store.selected, trendDays: store.effectiveRollingDays)
                     .frame(height: h)
             } else {
             ChartCard(title: c.title, icon: c.icon, series: c.series, days: days,
@@ -183,7 +182,7 @@ struct DashboardView: View {
         let title: String; let icon: String; let series: [Series]
         var zero = false; var note: String? = nil; var goal: Goal? = nil
         var zones: [Zone] = []; var footnote: String? = nil; var stages: [Series] = []; var nightDetail = false
-        var panels: [Panel] = []; var domain: ClosedRange<Double>? = nil
+        var bodyComp = false; var domain: ClosedRange<Double>? = nil
     }
 
     private func bpDomain(_ days: [DayPoint]) -> ClosedRange<Double> {
@@ -238,10 +237,7 @@ struct DashboardView: View {
                  series: [Series(field: .sleepHR, color: .red, tag: "HR"), Series(field: .sleepStress, color: .orange, tag: "stress")]),
         ]
         case .body: [
-            Card(title: "Body", icon: "scalemass.fill", series: [], panels: [
-                Panel(raw: .weight, avg: .weightAvg, color: .teal, title: "Weight kg", tag: "Weight"),
-                Panel(raw: .bodyFat, avg: .bodyFatAvg, color: .orange, title: "Body fat %", tag: "Fat"),
-                Panel(raw: .muscleMass, avg: .muscleAvg, color: .purple, title: "Muscle kg", tag: "Muscle")]),
+            Card(title: "Body composition", icon: "scalemass.fill", series: [], bodyComp: true),
             Card(title: "Resting heart rate", icon: "heart.fill", series: rhrSeries),
             stressCard,
         ]

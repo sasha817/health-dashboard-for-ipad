@@ -1,7 +1,7 @@
 import Foundation
 
 enum Field: String, CaseIterable, Hashable, Sendable {
-    case rhr, rhrAvg, sleepStart, sleepEnd, awakeCount, deepLo, deepHi, lightLo, lightHi, remLo, remHi, spo2Avg, spo2Low, respAvg, sleepHR, sleepStress, bodyFat, bodyFatAvg, muscleMass, muscleAvg, weightAvg, sleepHours, sleepScore, sleepDeep, sleepLight, sleepRem, sleepAwake, systolic, diastolic, weight, stress
+    case rhr, rhrAvg, sleepStart, sleepEnd, awakeCount, deepLo, deepHi, lightLo, lightHi, remLo, remHi, spo2Avg, spo2Low, respAvg, sleepHR, sleepStress, bodyFat, muscleMass, weightTrend, fatMassTrend, leanMassTrend, muscleTrend, sleepHours, sleepScore, sleepDeep, sleepLight, sleepRem, sleepAwake, systolic, diastolic, weight, stress
 
     var label: String {
         switch self {
@@ -10,7 +10,8 @@ enum Field: String, CaseIterable, Hashable, Sendable {
         case .sleepEnd: "Wake-up"
         case .awakeCount: "Awakenings"
         case .deepLo, .deepHi, .lightLo, .lightHi, .remLo, .remHi: "Ideal range"
-        case .rhrAvg, .weightAvg, .bodyFatAvg, .muscleAvg: "Rolling avg"
+        case .rhrAvg: "Rolling avg"
+        case .weightTrend, .fatMassTrend, .leanMassTrend, .muscleTrend: "Trend"
         case .spo2Avg: "SpO₂ avg"
         case .spo2Low: "SpO₂ lowest"
         case .respAvg: "Respiration"
@@ -36,10 +37,10 @@ enum Field: String, CaseIterable, Hashable, Sendable {
         case .rhr, .rhrAvg: "bpm"
         case .sleepStart, .sleepEnd, .awakeCount: ""
         case .deepLo, .deepHi, .lightLo, .lightHi, .remLo, .remHi: "h"
-        case .bodyFat, .bodyFatAvg, .spo2Avg, .spo2Low: "%"
+        case .bodyFat, .spo2Avg, .spo2Low: "%"
         case .respAvg: "/min"
         case .sleepHR: "bpm"
-        case .muscleMass, .muscleAvg, .weightAvg: "kg"
+        case .muscleMass, .weightTrend, .fatMassTrend, .leanMassTrend, .muscleTrend: "kg"
         case .sleepHours, .sleepDeep, .sleepLight, .sleepRem, .sleepAwake: "h"
         case .sleepScore, .stress, .sleepStress: ""
         case .systolic, .diastolic: "mmHg"
@@ -52,8 +53,8 @@ enum Field: String, CaseIterable, Hashable, Sendable {
         case .sleepHours, .sleepDeep, .sleepLight, .sleepRem, .sleepAwake, .deepLo, .deepHi, .lightLo, .lightHi, .remLo, .remHi:
             let m = Int((v * 60).rounded())
             return "\(m / 60)h \(String(format: "%02d", m % 60))m"
-        case .weight, .weightAvg, .muscleMass, .muscleAvg: return String(format: "%.1f kg", v)
-        case .bodyFat, .bodyFatAvg: return String(format: "%.1f %%", v)
+        case .weight, .muscleMass, .weightTrend, .fatMassTrend, .leanMassTrend, .muscleTrend: return String(format: "%.1f kg", v)
+        case .bodyFat: return String(format: "%.1f %%", v)
         case .spo2Avg, .spo2Low: return String(format: "%.0f %%", v)
         case .respAvg: return String(format: "%.0f /min", v)
         case .sleepHR: return String(format: "%.0f bpm", v)
