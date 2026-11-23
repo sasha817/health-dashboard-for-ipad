@@ -8,4 +8,4 @@
 - More ranges beyond 1 year / 2 years once long-term data is cached.
 - Optional: manual blood-pressure entry as an alternative to Apple Health.
 
-- Not possible with the Garmin Personal API (checked its Swagger schemas and a real `dailySleep` response): minute-by-minute sleep stages / hypnogram. Only nightly totals, bed/wake times and ideal ranges are provided.
+- Not possible with the Garmin Personal API (its Swagger page lists only summary schemas for sleep, and a real `dailySleep` response contained no stage list): minute-by-minute sleep stages / hypnogram. Only nightly totals, bed/wake times and ideal ranges are provided.

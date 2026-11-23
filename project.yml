@@ -27,3 +27,24 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: "Health Dashboard"
         INFOPLIST_KEY_NSHealthShareUsageDescription: "Shows your blood pressure readings from Apple Health next to your Garmin data. Read-only; nothing is uploaded."
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+  HealthForiPadTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests]
+    dependencies:
+      - target: HealthForiPad
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: app.healthdash.HealthForiPadTests
+schemes:
+  HealthForiPad:
+    build:
+      targets:
+        HealthForiPad: all
+        HealthForiPadTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets: [HealthForiPadTests]

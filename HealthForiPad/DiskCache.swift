@@ -1,14 +1,20 @@
 import Foundation
 
 struct CachedDay: Codable {
-    var date: Date
+    var day: String?          // "yyyy-MM-dd" calendar date: independent of time zone (preferred)
+    var date: Date?           // legacy caches stored an absolute noon Date
     var values: [String: Double]
+
+    /// Noon of the calendar day in the *current* time zone, so the same day always gets the same key.
+    var resolvedDate: Date? { day.flatMap(Cal.parse) ?? date.map(Cal.noon) }
 }
 
 struct CacheFile: Codable {
-    var version = 5
-    var coveredStart: Date?
-    var coveredEnd: Date?
+    var version = 6
+    var coveredStartDay: String?
+    var coveredEndDay: String?
+    var coveredStart: Date?     // legacy
+    var coveredEnd: Date?       // legacy
     var lastRefresh: Date?
     var days: [CachedDay] = []
 }

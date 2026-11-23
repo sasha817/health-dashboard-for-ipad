@@ -68,14 +68,23 @@ final class DashboardStore {
     private var client: GarminClient?
     private var clientKey: String?
     private var backfillTask: Task<Void, Never>?
+    private var backfillRunning = false
+    /// Bumped whenever cached data is discarded or switched (clear cache, demo toggle): results of requests that were
+    /// already in flight are then dropped instead of being merged into the wrong dataset.
+    private var generation = 0
+    private var loadPending = false
+    private var loadPendingManual = false
+    // one network fetch at a time (load / background sync / backfill never run concurrent bursts)
+    private var fetchLocked = false
+    private var fetchWaiters: [CheckedContinuation<Void, Never>] = []
     private var rateLimitStreak = 0
     /// Persisted so a relaunch (or a background task) doesn't hammer Garmin while the quota is exhausted.
     private var rateLimitedUntil: Date? {
         get { UserDefaults.standard.object(forKey: "rateLimitedUntil") as? Date }
         set { UserDefaults.standard.set(newValue, forKey: "rateLimitedUntil") }
     }
-    struct FetchOutcome { var rateLimited = false; var retryAfter: TimeInterval?; var requests = 0 }
-    var isBackfilling: Bool { backfillTask != nil }
+    struct FetchOutcome { var rateLimited = false; var retryAfter: TimeInterval?; var requests = 0; var failed = false; var error: String? }
+    var isBackfilling: Bool { backfillRunning }
 
     var hasKey: Bool { Keychain.read() != nil }
     var needsSetup: Bool { !useDemo && !hasKey }
@@ -166,21 +175,29 @@ final class DashboardStore {
         cacheLoaded = true
         guard let c = DiskCache.load() else { return }
         for d in c.days {
-            var p = DayPoint(date: d.date)
+            guard let date = d.resolvedDate else { continue }
+            var p = days[date] ?? DayPoint(date: date)
             for (k, v) in d.values { if let f = Field(rawValue: k) { p.values[f] = v } }
-            days[d.date] = p
+            days[date] = p
         }
-        // caches from before sleep stages / body composition existed keep their days but are re-fetched (coverage dropped)
-        if c.version >= 5 { coveredStart = c.coveredStart; coveredEnd = c.coveredEnd; lastRefresh = c.lastRefresh }
+        // Older caches keep their days but their coverage is dropped, so everything is verified and re-fetched once
+        // (earlier versions could mark a failed chunk as downloaded).
+        if c.version >= 6 {
+            coveredStart = c.coveredStartDay.flatMap(Cal.parse) ?? c.coveredStart.map(Cal.noon)
+            coveredEnd = c.coveredEndDay.flatMap(Cal.parse) ?? c.coveredEnd.map(Cal.noon)
+            lastRefresh = c.lastRefresh
+        }
         updateSummary()
     }
 
     private func saveCache() {
+        guard !useDemo else { return }          // demo data must never reach the real cache
         let list = days.values.compactMap { p -> CachedDay? in
             let v = Dictionary(uniqueKeysWithValues: DiskCache.persisted.compactMap { f in p[f].map { (f.rawValue, $0) } })
-            return v.isEmpty ? nil : CachedDay(date: p.date, values: v)
+            return v.isEmpty ? nil : CachedDay(day: Cal.iso(p.date), date: nil, values: v)
         }
-        DiskCache.save(CacheFile(coveredStart: coveredStart, coveredEnd: coveredEnd, lastRefresh: lastRefresh, days: list))
+        DiskCache.save(CacheFile(coveredStartDay: coveredStart.map(Cal.iso), coveredEndDay: coveredEnd.map(Cal.iso),
+                                 lastRefresh: lastRefresh, days: list))
         updateSummary()
     }
 
@@ -192,6 +209,7 @@ final class DashboardStore {
 
     /// Wipes the cache (memory + disk).
     func clearCache() {
+        generation += 1
         backfillTask?.cancel()
         days = [:]; coveredStart = nil; coveredEnd = nil; lastRefresh = nil; selected = nil
         warnings = []; rawSamples = [:]; errorMessage = nil; backfillMessage = nil
@@ -203,13 +221,25 @@ final class DashboardStore {
     func keyChanged() { client = nil; clientKey = nil; errorMessage = nil }
 
     /// Demo mode toggled: drop what's in memory; the cache is re-read from disk on the next load.
-    func switchedDemo() { days = [:]; selected = nil; cacheLoaded = false; coveredStart = nil; coveredEnd = nil; lastRefresh = nil; errorMessage = nil; updateSummary() }
+    func switchedDemo() { generation += 1; backfillTask?.cancel(); days = [:]; selected = nil; cacheLoaded = false; coveredStart = nil; coveredEnd = nil; lastRefresh = nil; errorMessage = nil; updateSummary() }
 
     // MARK: loading
     /// Loads what the current range needs. Cached days are shown instantly; only missing or stale days are fetched.
     /// `manual` (pull-to-refresh / refresh button) re-fetches the last two weeks regardless of cache freshness.
+    /// A call that arrives while a load is running is not lost: it runs right after the current one.
     func load(manual: Bool = false) async {
-        guard !isLoading else { return }
+        if isLoading { loadPending = true; loadPendingManual = loadPendingManual || manual; return }
+        isLoading = true
+        defer { isLoading = false }
+        var m = manual
+        repeat {
+            loadPending = false; loadPendingManual = false
+            await loadOnce(manual: m)
+            m = loadPendingManual
+        } while loadPending
+    }
+
+    private func loadOnce(manual: Bool) async {
         errorMessage = nil
         if useDemo {
             days = Demo.generate(); coveredStart = nil
@@ -221,8 +251,6 @@ final class DashboardStore {
             await mergeHealthKit()
             errorMessage = "No API key set. Open Settings to add one."; return
         }
-        isLoading = true
-        defer { isLoading = false }
 
         let today = Cal.noon(Date())
         let needFrom = Cal.add(-27, to: window.start)   // extra history for the longest (28-day) rolling window
@@ -244,8 +272,8 @@ final class DashboardStore {
         }
         if !ws.isEmpty {
             let touchesNewest = ws.contains { $0.1 >= today }
-            await runFetch(ws)
-            if touchesNewest { lastRefresh = Date() }
+            let o = await runFetch(ws)
+            if touchesNewest && !o.failed { lastRefresh = Date() }
             saveCache()
         }
         await mergeHealthKit()
@@ -260,14 +288,14 @@ final class DashboardStore {
         if let until = rateLimitedUntil, until > Date() { return }
         let today = Cal.noon(Date())
         let from = coveredEnd.map { max(coveredStart ?? $0, Cal.add(-6, to: $0)) } ?? Cal.add(-83, to: today)
-        await runFetch([(from, today)])
-        lastRefresh = Date()
+        let o = await runFetch([(from, today)])
+        if !o.failed { lastRefresh = Date() }
         saveCache()
     }
 
     // MARK: history download
     func startBackfill() {
-        guard backfillTask == nil, !useDemo else { return }
+        guard !backfillRunning, backfillTask == nil, !useDemo else { return }
         backfillTask = Task { [weak self] in
             await self?.backfill()
             self?.backfillTask = nil
@@ -278,8 +306,11 @@ final class DashboardStore {
 
     /// Downloads history backwards in 12-week steps until `historyYears` is reached. Resumable: every step is saved.
     /// Works in batches: after ~80 requests it pauses, and when Garmin reports a rate limit it waits (escalating) and continues.
-    /// In `background` mode it never waits; it saves and returns.
+    /// In `background` mode it never waits; it saves and returns. Only one download runs at a time.
     func backfill(background: Bool = false) async {
+        guard !backfillRunning, !useDemo else { return }
+        backfillRunning = true
+        defer { backfillRunning = false }
         loadCacheIfNeeded()
         guard ensureClient() != nil else { backfillMessage = "No API key set."; return }
         let today = Cal.noon(Date())
@@ -306,6 +337,7 @@ final class DashboardStore {
         }
         let span = Double(max(1, Cal.cal.dateComponents([.day], from: target, to: today).day ?? 1))
         var stalls = 0
+        var lastError: String?
         while !Task.isCancelled, let cs = coveredStart, cs > target {
             backfillProgress = min(1, max(0, Double(Cal.cal.dateComponents([.day], from: cs, to: today).day ?? 0) / span))
             if let until = rateLimitedUntil, until > Date() {
@@ -328,9 +360,10 @@ final class DashboardStore {
             }
             if coveredStart == cs {           // no progress without a rate limit: genuine error
                 stalls += 1
+                lastError = o.error ?? lastError
                 if stalls >= 2 {
                     backfillMessage = Task.isCancelled ? "Stopped. Progress is saved; continue any time."
-                                                       : "Paused after an error. Progress is saved; try again later."
+                        : "Paused after an error\(lastError.map { ": \($0)" } ?? ""). Progress is saved; try again later."
                     backfillProgress = nil
                     return
                 }
@@ -349,16 +382,39 @@ final class DashboardStore {
         return client
     }
 
-    private static func isTransient(_ error: Error) -> Bool {
-        if case GarminError.http(let code, _) = error { return code == 401 || code == 408 || code == 429 || code >= 500 }
-        return true   // network errors, cancellation, …
+    private func acquireFetchLock() async {
+        if !fetchLocked { fetchLocked = true; return }
+        await withCheckedContinuation { fetchWaiters.append($0) }
     }
 
-    /// Fetches the given windows (split into ≤28-day chunks), merges results into `days` and extends the coverage by every chunk that completed without a transient error.
+    private func releaseFetchLock() {
+        if fetchWaiters.isEmpty { fetchLocked = false } else { fetchWaiters.removeFirst().resume() }
+    }
+
+    private struct JobResult: Sendable {
+        let chunk: Int
+        let job: String
+        let parsed: [Date: [Field: Double]]?
+        let raw: String
+        let error: String?
+        let rateLimit: (retryAfter: TimeInterval?, body: String)?
+        let notFound: Bool
+    }
+
+    /// Fetches the given windows (split into ≤28-day chunks) and merges the results into `days`.
+    ///
+    /// A chunk counts as downloaded only if *every* request for it succeeded: HTTP 200 with a valid JSON body, or an
+    /// explicit "no content" (204) / 404. Anything else (another 4xx, 5xx, rate limit, network error, a body that is not
+    /// JSON) leaves the chunk undownloaded, so it is retried later, and the error is shown, never silently recorded.
+    /// A successful answer *replaces* what was cached for that chunk, so corrections and deletions in Garmin Connect arrive.
     @discardableResult
     private func runFetch(_ windows: [(Date, Date)]) async -> FetchOutcome {
         var outcome = FetchOutcome()
-        guard let client else { return outcome }
+        let gen = generation
+        await acquireFetchLock()
+        defer { releaseFetchLock() }
+        guard gen == generation, !useDemo, let client else { return outcome }
+
         var chunks: [(Date, Date)] = []
         for (a, b) in windows where a <= b {
             var s = a
@@ -375,49 +431,70 @@ final class DashboardStore {
         var bad = Set<Int>()
         var failures: [String: String] = [:]
         var okJobs = Set<String>()
+        var recordsPerJob: [String: Int] = [:], chunksPerJob: [String: Int] = [:], notFoundPerJob: [String: Int] = [:]
         var abort = false
         var index = 0
-        while index < tasks.count && !abort && !Task.isCancelled {
+        while index < tasks.count && !abort && !Task.isCancelled && gen == generation {
             let batch = Array(tasks[index..<min(index + 5, tasks.count)]); index += 5
             outcome.requests += batch.count
-            await withTaskGroup(of: (Int, String, [Date: [Field: Double]]?, String, Error?).self) { group in
+            await withTaskGroup(of: JobResult.self) { group in
                 for (ci, job) in batch {
                     let (a, b) = chunks[ci]
                     group.addTask {
                         do {
                             let data = try await client.get(job.path(a, b), query: Parsing.query(for: job, from: a, to: b))
+                            guard Parsing.isValidPayload(data) else { throw GarminError.badPayload }
                             let parsed = Parsing.parse(data, job: job)
                             let pretty = (try? JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed))
                                 .flatMap { try? JSONSerialization.data(withJSONObject: $0, options: [.prettyPrinted, .sortedKeys]) }
                                 .flatMap { String(data: $0, encoding: .utf8) } ?? String(data: data, encoding: .utf8) ?? ""
-                            return (ci, job.name, parsed, String(pretty.prefix(8000)), nil)
+                            return JobResult(chunk: ci, job: job.name, parsed: parsed, raw: String(pretty.prefix(8000)), error: nil, rateLimit: nil, notFound: false)
+                        } catch GarminError.http(404, _) {
+                            return JobResult(chunk: ci, job: job.name, parsed: nil, raw: "404 Not Found", error: nil, rateLimit: nil, notFound: true)
+                        } catch GarminError.rateLimited(let ra, let body) {
+                            return JobResult(chunk: ci, job: job.name, parsed: nil, raw: "", error: "Garmin rate limit reached", rateLimit: (ra, body), notFound: false)
                         } catch {
-                            return (ci, job.name, nil, "", error)
+                            return JobResult(chunk: ci, job: job.name, parsed: nil, raw: "", error: error.localizedDescription, rateLimit: nil, notFound: false)
                         }
                     }
                 }
-                for await (ci, name, parsed, raw, err) in group {
-                    remaining[ci, default: 0] -= 1
-                    if let err {
-                        failures[name] = err.localizedDescription
-                        rawSamples[name] = "ERROR: " + err.localizedDescription
-                        if Self.isTransient(err) { bad.insert(ci) }
-                        if case GarminError.rateLimited(let ra, let body) = err {
-                            abort = true; outcome.rateLimited = true; outcome.retryAfter = ra
-                            rawSamples["Rate limit"] = String(body.prefix(2000))
+                for await r in group {
+                    remaining[r.chunk, default: 0] -= 1
+                    guard gen == generation, !useDemo else { continue }      // cache was cleared / mode switched meanwhile
+                    if let err = r.error {
+                        failures[r.job] = err
+                        rawSamples[r.job] = "ERROR: " + err
+                        bad.insert(r.chunk)
+                        if outcome.error == nil { outcome.error = "\(r.job): \(err)" }
+                        if let rl = r.rateLimit {
+                            abort = true; outcome.rateLimited = true; outcome.retryAfter = rl.retryAfter
+                            rawSamples["Rate limit"] = String(rl.body.prefix(2000))
                         }
                         continue
                     }
-                    okJobs.insert(name)
-                    if rawSamples[name] == nil || rawSamples[name]!.hasPrefix("ERROR") { rawSamples[name] = raw }
-                    for (date, vals) in parsed ?? [:] {
+                    okJobs.insert(r.job)
+                    chunksPerJob[r.job, default: 0] += 1
+                    if r.notFound { notFoundPerJob[r.job, default: 0] += 1; continue }   // "no data": covered, nothing to merge
+                    if rawSamples[r.job] == nil || rawSamples[r.job]!.hasPrefix("ERROR") { rawSamples[r.job] = r.raw }
+                    // a successful answer replaces this job's fields for the whole chunk (deleted/revised entries disappear)
+                    let (a, b) = chunks[r.chunk]
+                    let fields = jobs.first { $0.name == r.job }?.extractors.map(\.field) ?? []
+                    var d = a
+                    while d <= b {
+                        if var p = days[d] { for f in fields { p.values[f] = nil }; days[d] = p }
+                        d = Cal.add(1, to: d)
+                    }
+                    for (date, vals) in r.parsed ?? [:] {
                         var p = days[date] ?? DayPoint(date: date)
                         for (f, v) in vals { p.values[f] = v }
                         days[date] = p
                     }
+                    recordsPerJob[r.job, default: 0] += r.parsed?.count ?? 0
                 }
             }
         }
+        guard gen == generation else { outcome.failed = true; return outcome }
+
         if outcome.rateLimited {
             // escalating cool-down: 75 s, 5 min, 20 min, then ~65 min (Garmin does not document the window)
             let steps: [TimeInterval] = [75, 300, 1200, 3900]
@@ -425,10 +502,20 @@ final class DashboardStore {
             rateLimitStreak += 1
             rateLimitedUntil = Date().addingTimeInterval(wait)
         } else if okJobs.count > 0 { rateLimitStreak = 0; rateLimitedUntil = nil }
-        warnings = failures.map { "\($0.key): \($0.value)" }.sorted()
+
+        var notes = failures.map { "\($0.key): \($0.value)" }.sorted()
+        // valid answers but no day records at all for a core job: probably an unexpected response format, say so
+        for core in ["Daily summaries", "Sleep"] where (chunksPerJob[core] ?? 0) >= 2 && (recordsPerJob[core] ?? 0) == 0
+            && (notFoundPerJob[core] ?? 0) < (chunksPerJob[core] ?? 0) {
+            notes.append("\(core): valid responses but no day records found (unexpected format? see Diagnostics)")
+        }
+        for (job, n) in notFoundPerJob where n == chunksPerJob[job] && n >= 2 { notes.append("\(job): not available from Garmin (404)") }
+        warnings = notes.sorted()
         if okJobs.isEmpty, let first = failures.values.first { errorMessage = first }
 
-        // coverage = the contiguous run of completed chunks that reaches closest to today
+        outcome.failed = !bad.isEmpty || outcome.rateLimited || Task.isCancelled
+
+        // coverage = the contiguous run of completely downloaded chunks that reaches closest to today
         var done = chunks.indices.filter { remaining[$0] == 0 && !bad.contains($0) }.map { chunks[$0] }
         if let cs = coveredStart, let ce = coveredEnd { done.append((cs, ce)) }
         done.sort { $0.0 < $1.0 }

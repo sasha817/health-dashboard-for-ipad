@@ -4,6 +4,7 @@ enum GarminError: LocalizedError {
     case http(Int, String)
     case rateLimited(retryAfter: TimeInterval?, body: String)
     case badToken
+    case badPayload
 
     var errorDescription: String? {
         switch self {
@@ -12,6 +13,7 @@ enum GarminError: LocalizedError {
             return "HTTP \(code)\(hint) \(body.prefix(160))"
         case .rateLimited(_, let body): return "Garmin rate limit reached. \(body.prefix(140))"
         case .badToken: return "Token endpoint returned an unexpected response"
+        case .badPayload: return "Garmin returned a response that is not valid JSON"
         }
     }
 }
@@ -24,8 +26,21 @@ actor GarminClient {
 
     init(apiKey: String) { self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    private func bearer(force: Bool = false) async throws -> String {
-        if !force, let t = token, t.exp.timeIntervalSinceNow > 300 { return t.value }
+    private var inflight: Task<String, Error>?
+
+    /// One token request at a time: parallel callers join the request that is already running instead of each
+    /// asking Garmin for a token (the quota is small). `stale` is a token that just got a 401; if another caller
+    /// has already replaced it, the newer token is returned without another request.
+    private func bearer(replacing stale: String? = nil) async throws -> String {
+        if let t = token, t.exp.timeIntervalSinceNow > 300, t.value != stale { return t.value }
+        if let running = inflight { return try await running.value }
+        let task = Task { try await self.requestToken() }
+        inflight = task
+        defer { inflight = nil }
+        return try await task.value
+    }
+
+    private func requestToken() async throws -> String {
         var req = URLRequest(url: Self.base.appendingPathComponent("personalapitoken-service/personal-api/personal-api-key/token"))
         req.httpMethod = "POST"
         req.setValue("ApiKey \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -66,8 +81,9 @@ actor GarminClient {
     }
 
     func get(_ path: String, query: [String: String] = [:]) async throws -> Data {
+        var stale: String?
         for attempt in 0..<2 {
-            let t = try await bearer(force: attempt == 1)
+            let t = try await bearer(replacing: stale)
             var comps = URLComponents(url: Self.base, resolvingAgainstBaseURL: false)!
             comps.path = path
             if !query.isEmpty { comps.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) } }
@@ -77,7 +93,8 @@ actor GarminClient {
             req.timeoutInterval = 45
             let (data, resp) = try await URLSession.shared.data(for: req)
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            if code == 401 && attempt == 0 { continue }
+            if code == 401 && attempt == 0 { stale = t; continue }
+            if code == 204 { return Data("null".utf8) }          // "no content" = a valid, empty answer
             guard (200..<300).contains(code) else { throw Self.failure(code, data, resp) }
             return data
         }
@@ -85,5 +102,5 @@ actor GarminClient {
     }
 
     /// Verifies the key by requesting a token.
-    func verify() async throws { _ = try await bearer(force: true) }
+    func verify() async throws { token = nil; _ = try await bearer() }
 }

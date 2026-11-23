@@ -109,13 +109,15 @@ enum Cal {
     static let isoFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = .current
+        f.calendar = Calendar(identifier: .gregorian)       // never a Buddhist/Japanese calendar year
         f.dateFormat = "yyyy-MM-dd"
         return f
     }()
-    static func iso(_ d: Date) -> String { isoFormatter.string(from: d) }
+    /// Calendar dates ("2026-11-23") are the identity of a day; the noon `Date` is derived from them in the current time zone.
+    static func iso(_ d: Date) -> String { isoFormatter.timeZone = .current; return isoFormatter.string(from: d) }
     static func parse(_ s: String) -> Date? {
         guard s.count >= 10 else { return nil }
+        isoFormatter.timeZone = .current
         return isoFormatter.date(from: String(s.prefix(10))).map(noon)
     }
 }
