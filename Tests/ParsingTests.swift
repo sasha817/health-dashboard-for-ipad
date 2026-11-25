@@ -11,6 +11,16 @@ final class ParsingTests: XCTestCase {
         return Dictionary(uniqueKeysWithValues: r.map { (Cal.iso($0.key), $0.value) })
     }
 
+    func testCaloriesStepsAndIntensityMinutes() {
+        let json = #"[{"calendarDate":"2026-11-17","calories":{"burnedActive":238,"burnedResting":2142,"burnedTotal":2380},"movement":{"steps":{"distanceInMeters":6054,"goal":7000,"value":7247}},"intensityMinutes":{"goal":150,"moderate":5,"vigorous":0}}]"#
+        let r = parse(json, "Daily summaries")["2026-11-17"]
+        XCTAssertEqual(r?[.activeKcal], 238)
+        XCTAssertEqual(r?[.restingKcal], 2142)
+        XCTAssertEqual(r?[.steps], 7247)
+        XCTAssertEqual(r?[.moderateMin], 5)
+        XCTAssertEqual(r?[.vigorousMin], 0)
+    }
+
     func testWrapperWithDateKeyDoesNotSwallowItsDays() {
         let json = #"{"date":"2026-05-01","data":[{"calendarDate":"2026-05-01","heartRate":{"restingValue":55}},{"calendarDate":"2026-05-02","heartRate":{"restingValue":57}}]}"#
         let r = parse(json, "Daily summaries")

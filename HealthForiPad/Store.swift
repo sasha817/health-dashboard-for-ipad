@@ -191,7 +191,7 @@ final class DashboardStore {
         }
         // Older caches keep their days but their coverage is dropped, so everything is verified and re-fetched once
         // (earlier versions could mark a failed chunk as downloaded).
-        if c.version >= 6 {
+        if c.version >= 7 {
             coveredStart = c.coveredStartDay.flatMap(Cal.parse) ?? c.coveredStart.map(Cal.noon)
             coveredEnd = c.coveredEndDay.flatMap(Cal.parse) ?? c.coveredEnd.map(Cal.noon)
             lastRefresh = c.lastRefresh
@@ -209,6 +209,16 @@ final class DashboardStore {
                                  lastRefresh: lastRefresh, days: list))
         updateSummary()
     }
+
+    /// How many cached days carry each of the activity fields (so the new data can be checked in Settings).
+    var activitySummary: String {
+        func n(_ f: Field) -> Int { days.values.filter { $0[f] != nil }.count }
+        let latest = days.values.filter { $0[.activeKcal] != nil }.max { $0.date < $1.date }
+        let last = latest.map { " · latest \($0.date.formatted(date: .abbreviated, time: .omitted)): \(Int($0[.activeKcal] ?? 0)) kcal active, \(Int($0[.steps] ?? 0)) steps" } ?? ""
+        return "calories \(n(.activeKcal)) d · steps \(n(.steps)) d · intensity \(n(.moderateMin)) d" + last
+    }
+
+    var coveredStartLabel: String { coveredStart?.formatted(.dateTime.month(.abbreviated).year()) ?? "…" }
 
     private func updateSummary() {
         guard let cs = coveredStart, let ce = coveredEnd else { cacheSummary = "Nothing cached yet"; return }
@@ -324,7 +334,9 @@ final class DashboardStore {
         loadCacheIfNeeded()
         guard ensureClient() != nil else { backfillMessage = "No API key set."; return }
         let today = Cal.noon(Date())
-        let target = Cal.add(-(historyYears * 365), to: today)
+        let everything = historyYears >= 99      // "Everything Garmin has": go back until the data ends
+        let target = everything ? (Cal.parse("2005-01-01") ?? Cal.add(-(25 * 365), to: today)) : Cal.add(-(historyYears * 365), to: today)
+        var emptyChunks = 0                      // consecutive 12-week chunks without any data (only used for "everything")
         let batchBudget = 80
         var used = 0
         backfillMessage = nil
@@ -368,6 +380,15 @@ final class DashboardStore {
                 used = 0
                 continue                      // the wait happens at the top of the loop (rateLimitedUntil is set)
             }
+            if everything, let ncs = coveredStart, ncs < cs {
+                let hasData = days.values.contains { $0.date >= from && $0.date < cs && !$0.values.isEmpty }
+                emptyChunks = hasData ? 0 : emptyChunks + 1
+                if emptyChunks >= 5 {         // ~14 months with nothing: the history has ended
+                    backfillProgress = nil
+                    backfillMessage = "Reached the start of your Garmin history (nothing before \(ncs.formatted(date: .abbreviated, time: .omitted)))."
+                    return
+                }
+            }
             if coveredStart == cs {           // no progress without a rate limit: genuine error
                 stalls += 1
                 lastError = o.error ?? lastError
@@ -381,7 +402,7 @@ final class DashboardStore {
             try? await Task.sleep(nanoseconds: 600_000_000)
         }
         backfillProgress = nil
-        if let cs = coveredStart, cs <= target { backfillMessage = "History is complete back to \(target.formatted(date: .abbreviated, time: .omitted))." }
+        if let cs = coveredStart, cs <= target, !everything { backfillMessage = "History is complete back to \(target.formatted(date: .abbreviated, time: .omitted))." }
         else if Task.isCancelled { backfillMessage = "Stopped. Progress is saved; continue any time." }
     }
 

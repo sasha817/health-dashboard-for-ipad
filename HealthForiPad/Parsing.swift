@@ -29,6 +29,11 @@ enum Parsing {
                 query: [:], extractors: [
                     Extractor(field: .rhr, keys: ["restingValue", "restingHeartRate"]),
                     Extractor(field: .stress, keys: ["avgLevel", "averageStressLevel"]),
+                    Extractor(field: .activeKcal, keys: [], path: ["calories", "burnedActive"]),
+                    Extractor(field: .restingKcal, keys: [], path: ["calories", "burnedResting"]),
+                    Extractor(field: .steps, keys: [], path: ["movement", "steps", "value"]),
+                    Extractor(field: .moderateMin, keys: [], path: ["intensityMinutes", "moderate"], allowZero: true),
+                    Extractor(field: .vigorousMin, keys: [], path: ["intensityMinutes", "vigorous"], allowZero: true),
                 ]),
             Job(name: "Sleep", path: { _, _ in "/sleep-service/sleep/dailySleepSummariesByDate" }, query: [:], extractors: [
                 Extractor(field: .sleepHours, keys: ["sleepTimeSeconds", "totalSleepSeconds", "sleepSeconds"], scale: 1.0 / 3600),

@@ -10,7 +10,7 @@ struct CachedDay: Codable {
 }
 
 struct CacheFile: Codable {
-    var version = 6
+    var version = 7
     var coveredStartDay: String?
     var coveredEndDay: String?
     var coveredStart: Date?     // legacy

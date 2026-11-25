@@ -50,11 +50,16 @@ struct SettingsView: View {
                 }
                 Section {
                     LabeledContent("Cached", value: store.cacheSummary)
+                    LabeledContent("Activity data", value: store.activitySummary).font(.caption)
                     Picker("Keep history back", selection: $store.historyYears) {
-                        Text("1 year").tag(1); Text("2 years").tag(2); Text("3 years").tag(3); Text("5 years").tag(5); Text("10 years").tag(10)
+                        Text("1 year").tag(1); Text("2 years").tag(2); Text("3 years").tag(3); Text("5 years").tag(5); Text("10 years").tag(10); Text("Everything Garmin has").tag(99)
                     }
                     if let p = store.backfillProgress {
-                        ProgressView(value: p) { Text("Downloading history… \(Int(p * 100)) %").font(.footnote) }
+                        if store.historyYears >= 99 {
+                            ProgressView { Text("Downloading history… back to \(store.coveredStartLabel)").font(.footnote) }
+                        } else {
+                            ProgressView(value: p) { Text("Downloading history… \(Int(p * 100)) %").font(.footnote) }
+                        }
                     }
                     if store.isBackfilling {
                         Button("Stop download", role: .cancel) { store.cancelBackfill() }

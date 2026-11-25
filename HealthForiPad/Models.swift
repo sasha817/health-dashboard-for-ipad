@@ -1,7 +1,7 @@
 import Foundation
 
 enum Field: String, CaseIterable, Hashable, Sendable {
-    case rhr, rhrAvg, sysMin, sysMax, diaMin, diaMax, sleepStart, sleepEnd, awakeCount, deepLo, deepHi, lightLo, lightHi, remLo, remHi, spo2Avg, spo2Low, respAvg, sleepHR, sleepStress, bodyFat, muscleMass, weightTrend, fatMassTrend, leanMassTrend, muscleTrend, sleepHours, sleepScore, sleepDeep, sleepLight, sleepRem, sleepAwake, systolic, diastolic, weight, stress
+    case rhr, rhrAvg, sysMin, sysMax, diaMin, diaMax, sleepStart, sleepEnd, awakeCount, deepLo, deepHi, lightLo, lightHi, remLo, remHi, spo2Avg, spo2Low, respAvg, sleepHR, sleepStress, bodyFat, muscleMass, weightTrend, fatMassTrend, leanMassTrend, muscleTrend, sleepHours, sleepScore, sleepDeep, sleepLight, sleepRem, sleepAwake, systolic, diastolic, weight, stress, activeKcal, restingKcal, steps, moderateMin, vigorousMin
 
     var label: String {
         switch self {
@@ -31,6 +31,11 @@ enum Field: String, CaseIterable, Hashable, Sendable {
         case .diastolic: "Diastolic"
         case .weight: "Weight"
         case .stress: "Stress"
+        case .activeKcal: "Active calories"
+        case .restingKcal: "Resting calories"
+        case .steps: "Steps"
+        case .moderateMin: "Moderate minutes"
+        case .vigorousMin: "Vigorous minutes"
         }
     }
 
@@ -47,6 +52,9 @@ enum Field: String, CaseIterable, Hashable, Sendable {
         case .sleepScore, .stress, .sleepStress: ""
         case .systolic, .diastolic, .sysMin, .sysMax, .diaMin, .diaMax: "mmHg"
         case .weight: "kg"
+        case .activeKcal, .restingKcal: "kcal"
+        case .steps: ""
+        case .moderateMin, .vigorousMin: "min"
         }
     }
 
@@ -65,6 +73,9 @@ enum Field: String, CaseIterable, Hashable, Sendable {
         case .rhrAvg: return String(format: "%.1f bpm", v)
         case .systolic, .diastolic, .sysMin, .sysMax, .diaMin, .diaMax: return String(format: "%.0f", v)
         case .sleepScore, .stress, .sleepStress: return String(format: "%.0f", v)
+        case .activeKcal, .restingKcal: return String(format: "%.0f kcal", v)
+        case .steps: return String(format: "%.0f", v)
+        case .moderateMin, .vigorousMin: return String(format: "%.0f min", v)
         }
     }
 }
