@@ -14,7 +14,7 @@ struct TrendsView: View {
         var component: Calendar.Component { self == .week ? .weekOfYear : .month }
     }
 
-    private let yoyFields: [Field] = [.weight, .rhr, .activeKcal, .steps]
+    private var yoyFields: [Field] { [Field.weight, .rhr, .activeKcal, .steps].filter { $0 == .weight || $0 == .rhr || hasHistory($0) } }
 
     // MARK: aggregation
 
@@ -35,6 +35,10 @@ struct TrendsView: View {
         let all = store.days.values.filter { !$0.values.isEmpty }.map(\.date)
         guard let a = all.min(), let b = all.max() else { return nil }
         return a...b
+    }
+
+    private func yoyTitle(_ f: Field) -> String {
+        switch f { case .rhr: return "RHR"; case .activeKcal: return "Active kcal"; default: return f.label }
     }
 
     private struct YearLine: Identifiable { let year: Int; let points: [(month: Int, value: Double)]; var id: Int { year } }
@@ -81,15 +85,24 @@ struct TrendsView: View {
         return "\(f(s.lowerBound)) – \(f(s.upperBound)) · \(store.days.count) days"
     }
 
-    private var weightBins: [Bin] { bins(.weight) }
-    private var activityBins: [Bin] { bins(.activeKcal) }
+    /// Metrics with enough history to be worth a panel (calories/steps only exist for the recent past in Garmin's API).
+    private func hasHistory(_ f: Field) -> Bool { store.days.values.filter { $0[f] != nil }.count >= 60 }
+
+    private struct Panel { let field: Field; let title: String; let color: Color; let bars: Bool; let decimals: Int }
+    private var panels: [Panel] {
+        var p = [Panel(field: .weight, title: "Weight kg", color: .primary, bars: false, decimals: 0),
+                 Panel(field: .rhr, title: "Resting heart rate bpm", color: .red, bars: false, decimals: 0)]
+        if hasHistory(.activeKcal) { p.append(Panel(field: .activeKcal, title: "Active kcal / day", color: .orange, bars: true, decimals: 0)) }
+        return p
+    }
 
     private var longTermCard: some View {
-        let firstBin = ([weightBins.first?.date, activityBins.first?.date].compactMap { $0 }).min()
+        let ps = panels
+        let firstBin = ps.compactMap { bins($0.field).first?.date }.min()
         let dom: ClosedRange<Date>? = span.flatMap { s in firstBin.map { min($0, s.lowerBound).addingTimeInterval(-86400 * 3)...s.upperBound.addingTimeInterval(86400 * 20) } }
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label("Weight & activity", systemImage: "chart.xyaxis.line").font(.headline)
+                Label("Long-term trends", systemImage: "chart.xyaxis.line").font(.headline)
                 Spacer()
                 Text(header).font(.caption).foregroundStyle(.secondary)
                 Picker("", selection: $bucket) { ForEach(Bucket.allCases) { Text($0.rawValue).tag($0) } }
@@ -97,60 +110,55 @@ struct TrendsView: View {
             }
             GeometryReader { g in
                 VStack(spacing: 0) {
-                    chartWeight(dom).frame(height: g.size.height * 0.6)
-                    chartActivity(dom).frame(height: g.size.height * 0.4)
+                    ForEach(Array(ps.enumerated()), id: \.offset) { i, p in
+                        panel(p, dom, last: i == ps.count - 1).frame(height: g.size.height / Double(ps.count))
+                    }
                 }
             }
-            Text("Average per \(bucket == .week ? "week" : "month"). Bars: average active calories burned per day (Garmin has no calories eaten).")
+            Text("Average per \(bucket == .week ? "week" : "month") over all cached years, panels share one time axis.")
                 .font(.caption2).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.7)
         }
         .padding(14)
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 16))
-        .accessibilityElement(children: .contain).accessibilityLabel("Weight and activity over all years")
+        .accessibilityElement(children: .contain).accessibilityLabel("Weight and resting heart rate over all years")
     }
 
-    private func yAxis(_ unit: String) -> some AxisContent {
+    private func yAxis() -> some AxisContent {
         AxisMarks(position: .trailing, values: .automatic(desiredCount: 4)) { v in
             AxisGridLine()
             AxisValueLabel { if let d = v.as(Double.self) { Text(String(format: "%.0f", d)).monospacedDigit().frame(width: 40, alignment: .leading) } }
         }
     }
 
-    private func chartWeight(_ dom: ClosedRange<Date>?) -> some View {
-        let b = weightBins
+    private func panel(_ p: Panel, _ dom: ClosedRange<Date>?, last: Bool) -> some View {
+        let b = bins(p.field)
         return Chart {
-            ForEach(b) { p in
-                LineMark(x: .value("Date", p.date), y: .value("Weight", p.value)).foregroundStyle(Color.primary.opacity(0.85))
-                    .interpolationMethod(.monotone).lineStyle(StrokeStyle(lineWidth: 2.2, lineCap: .round))
+            ForEach(b) { pt in
+                if p.bars {
+                    BarMark(x: .value("Date", pt.date, unit: bucket.component), y: .value(p.title, pt.value)).foregroundStyle(p.color.opacity(0.8))
+                } else {
+                    LineMark(x: .value("Date", pt.date), y: .value(p.title, pt.value)).foregroundStyle(p.color.opacity(0.9))
+                        .interpolationMethod(.monotone).lineStyle(StrokeStyle(lineWidth: 2.2, lineCap: .round))
+                }
             }
         }
-        .chartYScale(domain: .automatic(includesZero: false))
+        .chartYScale(domain: .automatic(includesZero: p.bars))
         .modifier(OptionalXScale(domain: dom))
-        .chartXAxis { AxisMarks(values: .automatic(desiredCount: 12)) { _ in AxisGridLine() } }
-        .chartYAxis { yAxis("kg") }
-        .overlay(alignment: .topLeading) { Text("Weight kg").font(.caption2.weight(.bold)).padding(.leading, 6).padding(.top, 2) }
-        .overlay { if b.isEmpty { Text("No weight data cached.").font(.callout).foregroundStyle(.secondary) } }
-        .padding(.bottom, 6)
+        .chartXAxis {
+            AxisMarks(values: .automatic(desiredCount: 8)) { _ in
+                AxisGridLine()
+                if last { AxisTick(); AxisValueLabel(format: xFormat) }
+            }
+        }
+        .chartYAxis { yAxis() }
+        .overlay(alignment: .topLeading) { Text(p.title).font(.caption2.weight(.bold)).foregroundStyle(p.color == .primary ? .primary : p.color).padding(.leading, 6).padding(.top, 2) }
+        .overlay { if b.isEmpty { Text("No data cached.").font(.callout).foregroundStyle(.secondary) } }
+        .padding(.vertical, 7)       // keeps the end labels of neighbouring panels apart
     }
 
-    private func chartActivity(_ dom: ClosedRange<Date>?) -> some View {
-        let b = activityBins
-        return Chart {
-            ForEach(b) { p in
-                BarMark(x: .value("Date", p.date, unit: bucket.component), y: .value("Active kcal", p.value))
-                    .foregroundStyle(Color.orange.opacity(0.8))
-            }
-        }
-        .modifier(OptionalXScale(domain: dom))
-        .chartXAxis { AxisMarks(values: .automatic(desiredCount: 7)) { _ in AxisGridLine(); AxisTick(); AxisValueLabel(format: .dateTime.year()) } }
-        .chartYAxis { yAxis("kcal") }
-        .overlay(alignment: .topLeading) {
-            HStack(spacing: 6) {
-                Text("Active kcal / day").font(.caption2.weight(.bold)).foregroundStyle(.orange)
-                if b.isEmpty { Text("not downloaded yet — refresh").font(.caption2).foregroundStyle(.secondary) }
-            }.padding(.leading, 6).padding(.top, 2)
-        }
-        .padding(.top, 6)
+    private var xFormat: Date.FormatStyle {
+        let days = span.map { Cal.cal.dateComponents([.day], from: $0.lowerBound, to: $0.upperBound).day ?? 0 } ?? 0
+        return days > 900 ? .dateTime.year() : .dateTime.month(.abbreviated).year(.twoDigits)
     }
 
     // MARK: year vs year
@@ -168,16 +176,19 @@ struct TrendsView: View {
             HStack {
                 Label("Year vs. year", systemImage: "calendar").font(.headline).lineLimit(1).fixedSize()
                 Spacer()
-                Picker("", selection: $yoyField) { ForEach(yoyFields, id: \.self) { Text($0 == .rhr ? "RHR" : $0 == .activeKcal ? "Active kcal" : $0.label).tag($0) } }
+                Picker("", selection: $yoyField) { ForEach(yoyFields, id: \.self) { f in Text(yoyTitle(f)).tag(f) } }
                     .pickerStyle(.segmented).frame(maxWidth: 300)
             }
             Chart {
                 ForEach(lines) { l in
+                    let c: Color = color(l.year)
+                    let w: CGFloat = l.year == current ? 3.6 : 1.8
+                    let yName: String = String(l.year)
                     ForEach(l.points, id: \.month) { pt in
-                        LineMark(x: .value("Month", pt.month), y: .value(yoyField.label, pt.value), series: .value("Year", String(l.year)))
-                            .foregroundStyle(color(l.year))
+                        LineMark(x: .value("Month", pt.month), y: .value("Value", pt.value), series: .value("Year", yName))
+                            .foregroundStyle(c)
                             .interpolationMethod(.monotone)
-                            .lineStyle(StrokeStyle(lineWidth: l.year == current ? 3.6 : 1.8, lineCap: .round))
+                            .lineStyle(StrokeStyle(lineWidth: w, lineCap: .round))
                     }
                 }
             }
@@ -189,7 +200,7 @@ struct TrendsView: View {
                     AxisValueLabel { if let m = v.as(Int.self) { Text(Calendar.current.shortMonthSymbols[m - 1]).font(.caption2) } }
                 }
             }
-            .chartYAxis { yAxis("") }
+            .chartYAxis { yAxis() }
             .overlay { if lines.isEmpty { Text("No data cached for this metric.").font(.callout).foregroundStyle(.secondary) } }
             // legend: one chip per year
             ScrollView(.horizontal, showsIndicators: false) {

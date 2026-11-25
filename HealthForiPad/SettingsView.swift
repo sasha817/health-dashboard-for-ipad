@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @State private var probing = false
+    @State private var probeResult = ""
     @Environment(DashboardStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var key = ""
@@ -76,6 +78,15 @@ struct SettingsView: View {
                 }
                 Section("Demo") {
                     Toggle("Use demo data", isOn: Binding(get: { store.useDemo }, set: { store.useDemo = $0; store.switchedDemo(); Task { await store.load() } }))
+                }
+                Section {
+                    Button(probing ? "Asking Garmin…" : "Check how far back Garmin goes") {
+                        probing = true
+                        Task { probeResult = await store.probeHistory(); probing = false }
+                    }.disabled(probing || !store.hasKey || store.useDemo)
+                    if !probeResult.isEmpty { Text(probeResult).font(.system(.footnote, design: .monospaced)).textSelection(.enabled) }
+                } header: { Text("Diagnostics — history") } footer: {
+                    Text("Requests one week of daily data at 7 different ages (7 requests) and shows how many days carry resting heart rate, calories, steps and stress.")
                 }
                 Section("Diagnostics — raw API responses") {
                     if store.rawSamples.isEmpty { Text("Load data first").foregroundStyle(.secondary) }

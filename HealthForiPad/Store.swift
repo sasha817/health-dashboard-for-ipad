@@ -406,6 +406,29 @@ final class DashboardStore {
         else if Task.isCancelled { backfillMessage = "Stopped. Progress is saved; continue any time." }
     }
 
+    /// Diagnostic: asks Garmin for one week of daily summaries at several ages and reports what comes back
+    /// (so we can see how far back calories, steps and resting heart rate really go). Uses 7 requests.
+    func probeHistory() async -> String {
+        guard let client = ensureClient() else { return "No API key set." }
+        guard let job = Parsing.jobs().first(where: { $0.name == "Daily summaries" }) else { return "" }
+        let today = Cal.noon(Date())
+        var lines: [String] = []
+        for (label, daysAgo) in [("1 month", 30), ("3 months", 90), ("1 year", 365), ("2 years", 730), ("4 years", 1460), ("7 years", 2555), ("10 years", 3650)] {
+            let a = Cal.add(-daysAgo, to: today), b = Cal.add(6, to: a)
+            do {
+                let data = try await client.get(job.path(a, b), query: Parsing.query(for: job, from: a, to: b))
+                let parsed = Parsing.parse(data, job: job)
+                func n(_ f: Field) -> Int { parsed.values.filter { $0[f] != nil }.count }
+                lines.append("\(label) (\(Cal.iso(a))): \(parsed.count) days · RHR \(n(.rhr)) · calories \(n(.activeKcal)) · steps \(n(.steps)) · stress \(n(.stress))")
+            } catch GarminError.rateLimited {
+                lines.append("\(label): rate limit — wait a minute and try again"); break
+            } catch {
+                lines.append("\(label) (\(Cal.iso(a))): \(error.localizedDescription.prefix(80))")
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
     // MARK: network
     private func ensureClient() -> GarminClient? {
         guard let key = Keychain.read() else { return nil }
