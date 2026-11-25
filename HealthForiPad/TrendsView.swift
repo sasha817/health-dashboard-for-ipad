@@ -7,6 +7,8 @@ struct TrendsView: View {
     @Environment(DashboardStore.self) private var store
     @State private var bucket: Bucket = .month
     @State private var yoyField: Field = .weight
+    @State private var selectedBin: Date?       // week / month start selected by touch-and-hold
+    @State private var selectedMonth: Int?      // 1...12 on the year-vs-year chart
 
     enum Bucket: String, CaseIterable, Identifiable {
         case week = "Weekly", month = "Monthly"
@@ -102,6 +104,11 @@ struct TrendsView: View {
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label("Long-term trends", systemImage: "chart.xyaxis.line").font(.headline)
+                if let b = selectedBin {
+                    Text(binLabel(b)).font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 10).padding(.vertical, 3).background(Color.accentColor.opacity(0.18), in: Capsule())
+                    Button("Clear") { withAnimation { selectedBin = nil } }.buttonStyle(.bordered).controlSize(.mini)
+                }
                 Spacer()
                 Text(header).font(.caption).foregroundStyle(.secondary)
                 Picker("", selection: $bucket) { ForEach(Bucket.allCases) { Text($0.rawValue).tag($0) } }
@@ -122,6 +129,14 @@ struct TrendsView: View {
         .accessibilityElement(children: .contain).accessibilityLabel("Weight and resting heart rate over all years")
     }
 
+    private func binLabel(_ d: Date) -> String {
+        bucket == .month ? d.formatted(.dateTime.month(.wide).year()) : "Week of " + d.formatted(.dateTime.day().month(.abbreviated).year())
+    }
+
+    private var allBinDates: [Date] { Array(Set(bins(.weight).map(\.date) + bins(.rhr).map(\.date))).sorted() }
+
+    private func nearestBin(to d: Date) -> Date? { allBinDates.min { abs($0.timeIntervalSince(d)) < abs($1.timeIntervalSince(d)) } }
+
     private func yAxis() -> some AxisContent {
         AxisMarks(position: .trailing, values: .automatic(desiredCount: 4)) { v in
             AxisGridLine()
@@ -132,6 +147,12 @@ struct TrendsView: View {
     private func panel(_ p: Panel, _ dom: ClosedRange<Date>?, last: Bool) -> some View {
         let b = bins(p.field)
         return Chart {
+            if let sel = selectedBin {
+                RuleMark(x: .value("Selected", sel)).foregroundStyle(.secondary.opacity(0.7)).lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                if let v = b.first(where: { $0.date == sel })?.value {
+                    PointMark(x: .value("Date", sel), y: .value(p.title, v)).foregroundStyle(p.color).symbolSize(120)
+                }
+            }
             ForEach(b) { pt in
                 if p.bars {
                     BarMark(x: .value("Date", pt.date, unit: bucket.component), y: .value(p.title, pt.value)).foregroundStyle(p.color.opacity(0.8))
@@ -143,6 +164,9 @@ struct TrendsView: View {
         }
         .chartYScale(domain: .automatic(includesZero: p.bars))
         .modifier(OptionalXScale(domain: dom))
+        .chartOverlay { proxy in
+            TrendOverlay(proxy: proxy, onPick: { x in if let d = nearestBin(to: x) { selectedBin = d } }, onClear: { selectedBin = nil })
+        }
         .chartXAxis {
             AxisMarks(values: .automatic(desiredCount: 8)) { _ in
                 AxisGridLine()
@@ -150,7 +174,16 @@ struct TrendsView: View {
             }
         }
         .chartYAxis { yAxis() }
-        .overlay(alignment: .topLeading) { Text(p.title).font(.caption2.weight(.bold)).foregroundStyle(p.color == .primary ? .primary : p.color).padding(.leading, 6).padding(.top, 2) }
+        .overlay(alignment: .topLeading) {
+            HStack(spacing: 8) {
+                Text(p.title).font(.caption2.weight(.bold))
+                if let sel = selectedBin {
+                    Text(b.first(where: { $0.date == sel }).map { p.field.format($0.value) } ?? "no data")
+                        .font(.callout.monospacedDigit().weight(.semibold))
+                }
+            }
+            .foregroundStyle(p.color == .primary ? .primary : p.color).padding(.leading, 6).padding(.top, 2)
+        }
         .overlay { if b.isEmpty { Text("No data cached.").font(.callout).foregroundStyle(.secondary) } }
         .padding(.vertical, 7)       // keeps the end labels of neighbouring panels apart
     }
@@ -174,11 +207,19 @@ struct TrendsView: View {
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label("Year vs. year", systemImage: "calendar").font(.headline).lineLimit(1).fixedSize()
+                if let m = selectedMonth {
+                    Text(Calendar.current.monthSymbols[m - 1]).font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 10).padding(.vertical, 3).background(Color.accentColor.opacity(0.18), in: Capsule())
+                    Button("Clear") { withAnimation { selectedMonth = nil } }.buttonStyle(.bordered).controlSize(.mini)
+                }
                 Spacer()
                 Picker("", selection: $yoyField) { ForEach(yoyFields, id: \.self) { f in Text(yoyTitle(f)).tag(f) } }
                     .pickerStyle(.segmented).frame(maxWidth: 300)
             }
             Chart {
+                if let m = selectedMonth {
+                    RuleMark(x: .value("Month", m)).foregroundStyle(.secondary.opacity(0.7)).lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                }
                 ForEach(lines) { l in
                     let c: Color = color(l.year)
                     let w: CGFloat = l.year == current ? 3.6 : 1.8
@@ -193,6 +234,9 @@ struct TrendsView: View {
             }
             .chartXScale(domain: 1...12)
             .chartYScale(domain: .automatic(includesZero: false))
+            .chartOverlay { proxy in
+                TrendOverlay(proxy: proxy, onPick: { (x: Double) in selectedMonth = min(12, max(1, Int(x.rounded()))) }, onClear: { selectedMonth = nil })
+            }
             .chartXAxis {
                 AxisMarks(values: Array(1...12)) { v in
                     AxisGridLine()
@@ -208,6 +252,10 @@ struct TrendsView: View {
                         HStack(spacing: 4) {
                             Capsule().fill(color(y)).frame(width: 14, height: y == current ? 4 : 3)
                             Text(String(y)).font(.caption).foregroundStyle(y == current ? .primary : .secondary)
+                            if let m = selectedMonth {
+                                let v = lines.first { $0.year == y }?.points.first { $0.month == m }?.value
+                                Text(v.map { yoyField.format($0) } ?? "–").font(.caption.monospacedDigit().weight(.semibold))
+                            }
                         }
                     }
                 }
@@ -225,5 +273,30 @@ private struct OptionalXScale: ViewModifier {
     let domain: ClosedRange<Date>?
     func body(content: Content) -> some View {
         if let d = domain { content.chartXScale(domain: d) } else { content }
+    }
+}
+
+
+/// Touch-and-hold, then drag, on a trend chart. Reports the x value under the finger (a Date or a Double); tap clears.
+private struct TrendOverlay<X: Plottable>: View {
+    let proxy: ChartProxy
+    let onPick: (X) -> Void
+    let onClear: () -> Void
+
+    var body: some View {
+        GeometryReader { geo in
+            Rectangle().fill(.clear).contentShape(Rectangle())
+                .onTapGesture { withAnimation(.snappy) { onClear() } }
+                .gesture(
+                    LongPressGesture(minimumDuration: 0.25)
+                        .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
+                        .onChanged { value in
+                            guard case .second(true, let drag) = value, let drag, let frame = proxy.plotFrame else { return }
+                            let x = drag.location.x - geo[frame].origin.x
+                            guard let v: X = proxy.value(atX: x) else { return }
+                            withAnimation(.snappy(duration: 0.15)) { onPick(v) }
+                        }
+                )
+        }
     }
 }
