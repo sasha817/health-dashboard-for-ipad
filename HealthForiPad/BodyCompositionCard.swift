@@ -116,6 +116,8 @@ struct BodyCompositionCard: View {
         }
         .padding(14)
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 16))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Body composition, " + tiles.map { "\($0.title) \($0.value)" }.joined(separator: ", "))
     }
 
     private func legend(_ c: Color, _ text: String) -> some View {

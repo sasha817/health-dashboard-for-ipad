@@ -138,8 +138,13 @@ final class DashboardStore {
         for p in all {
             if let w = p[.weight], let bf = p[.bodyFat] { let fat = w * bf / 100; fatPts.append((p.date, fat)); leanPts.append((p.date, w - fat)) }
         }
-        return (ewma(all.compactMap { p in p[.weight].map { (p.date, $0) } }), ewma(fatPts), ewma(leanPts),
-                ewma(all.compactMap { p in p[.muscleMass].map { (p.date, $0) } }))
+        let weight = ewma(all.compactMap { p in p[.weight].map { (p.date, $0) } })
+        let fat = ewma(fatPts)
+        // lean = weight trend − fat trend, so lean + fat always adds up to exactly the weight trend line
+        // (weigh-ins without a body-fat reading would otherwise make the stacked area drift away from it)
+        var lean = ewma(leanPts)
+        for (d, f) in fat { if let w = weight[d] { lean[d] = w - f } }
+        return (weight, fat, lean, ewma(all.compactMap { p in p[.muscleMass].map { (p.date, $0) } }))
     }
 
     func setRange(_ r: TimeRange) {

@@ -62,6 +62,8 @@ struct BloodPressureCard: View {
         }
         .padding(14)
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 16))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(shown.map { "Blood pressure, \(selected == nil ? "average" : "selected day") \(Int($0.sys.rounded())) over \(Int($0.dia.rounded())) millimetres of mercury, \(guideline.categoryNames[guideline.category(sys: $0.sys, dia: $0.dia)])" } ?? "Blood pressure, no data")
     }
 
     private func domain(_ s: Spec) -> ClosedRange<Double> {
@@ -205,6 +207,8 @@ struct BloodPressureMapCard: View {
         }
         .padding(14)
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 16))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Blood pressure map, \(points.count) readings")
     }
 
     private var chart: some View {

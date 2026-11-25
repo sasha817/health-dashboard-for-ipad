@@ -113,6 +113,13 @@ struct ChartCard: View {
         }
         .padding(14)
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 16))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(a11yLabel)
+    }
+
+    private var a11yLabel: String {
+        let vals = headerSeries.map { s in "\(s.tag ?? s.field.label) \(headerValue(s).map { s.field.format($0) } ?? "no data")" }
+        return ([title, selected.map { $0.shortDayLabel } ?? "period average"] + vals).joined(separator: ", ")
     }
 
     @ViewBuilder private func applyY<V: View>(_ v: V) -> some View {
@@ -171,7 +178,7 @@ struct ChartCard: View {
                     if let v = d[s.field] {
                         BarMark(x: .value("Day", d.date, unit: .day), y: .value(s.field.label, v))
                             .foregroundStyle(by: .value("Stage", s.field.label))
-                            .opacity(selected == nil || selected == d.date ? 1 : 0.4)
+                            .opacity((selected == nil || selected == d.date ? 1 : 0.4) * (s.tag == "Awake" ? 0.6 : 1))
                     }
                 }
             }

@@ -14,7 +14,7 @@ struct Extractor: Sendable {
 
 struct Job: Sendable {
     let name: String
-    let path: (Date, Date) -> String
+    let path: @Sendable (Date, Date) -> String
     let query: [String: String]
     let extractors: [Extractor]
 }
