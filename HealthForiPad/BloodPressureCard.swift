@@ -200,7 +200,7 @@ struct BloodPressureMapCard: View {
                 chart.frame(width: g.size.width, height: g.size.height).clipped()
             }
             .clipped()
-            Text("\(guideline == .aha ? "AHA" : "ESC") regions · each dot = one reading · darker dots = more recent")
+            Text("\(guideline == .aha ? "AHA" : "ESC") regions · across: diastolic, up: systolic · each dot = one reading, darker = more recent")
                 .font(.caption2).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.7)
         }
         .padding(14)
@@ -230,8 +230,6 @@ struct BloodPressureMapCard: View {
         .chartXScale(domain: xr)
         .chartYScale(domain: yr)
         .chartPlotStyle { $0.clipped() }
-        .chartXAxisLabel("Diastolic mmHg", alignment: .center)
-        .chartYAxisLabel("Systolic mmHg", position: .trailing)
         .chartOverlay { proxy in
             GeometryReader { geo in
                 Rectangle().fill(.clear).contentShape(Rectangle())

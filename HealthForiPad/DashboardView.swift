@@ -29,11 +29,25 @@ struct DashboardView: View {
                     if landscape { rail }
                     content(width: geo.size.width - (landscape ? railWidth : 0), height: geo.size.height, landscape: landscape)
                 }
+                // landscape: no navigation bar at all, its controls live in the rail
+                .toolbar(landscape ? .hidden : .visible, for: .navigationBar)
+                .overlay(alignment: .top) { if landscape && screen == .body { selectionChip.padding(.top, 6) } }
                 .overlay(alignment: .bottom) { if !landscape { floatingTabs.padding(.bottom, 10) } }
             }
-            .navigationTitle(screen.rawValue)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    HStack(spacing: 8) {
+                        if let s = store.selected {
+                            Image(systemName: "hand.tap.fill").foregroundStyle(.tint)
+                            Text(s.shortDayLabel).font(.headline)
+                            Button("Clear") { withAnimation { store.selected = nil } }.buttonStyle(.bordered).controlSize(.small)
+                        } else {
+                            Text(screen.rawValue).font(.headline)
+                        }
+                        if store.useDemo { Text("DEMO").font(.caption2.bold()).padding(4).background(.orange.opacity(0.25), in: Capsule()) }
+                    }
+                }
                 ToolbarItem(placement: .principal) {
                     Picker("Range", selection: Binding(get: { store.range }, set: { store.setRange($0) })) {
                         ForEach(store.availableRanges) { Text($0.short).tag($0) }
@@ -69,11 +83,42 @@ struct DashboardView: View {
                 .buttonStyle(.plain)
             }
             Spacer()
+            if store.useDemo { Text("DEMO").font(.caption2.bold()).padding(4).background(.orange.opacity(0.25), in: Capsule()) }
+            VStack(spacing: 4) {
+                ForEach(store.availableRanges) { r in
+                    Button { store.setRange(r) } label: {
+                        Text(r.short).font(.subheadline.weight(.semibold))
+                            .frame(width: 66, height: 32)
+                            .foregroundStyle(store.range == r ? Color.white : .primary)
+                            .background(store.range == r ? Color.accentColor : Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+                    }.buttonStyle(.plain)
+                }
+            }
+            if store.isLoading || store.backfillProgress != nil { ProgressView() }
+            HStack(spacing: 4) {
+                Button { Task { await store.load(manual: true) } } label: { Image(systemName: "arrow.clockwise").frame(width: 36, height: 36) }
+                Button { showSettings = true } label: { Image(systemName: "gearshape").frame(width: 36, height: 36) }
+            }
+            .padding(.bottom, 12)
         }
         .padding(.top, 14)
         .frame(width: railWidth)
         .frame(maxHeight: .infinity)
         .background(.bar)
+    }
+
+    /// Selected day (landscape): a small floating chip instead of a permanent status row.
+    @ViewBuilder private var selectionChip: some View {
+        if let sel = store.selected {
+            HStack(spacing: 8) {
+                Image(systemName: "hand.tap.fill").foregroundStyle(.tint)
+                Text(sel.shortDayLabel).font(.subheadline.weight(.semibold))
+                Button("Clear") { withAnimation { store.selected = nil } }.buttonStyle(.bordered).controlSize(.small)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(.regularMaterial, in: Capsule())
+            .shadow(radius: 4, y: 1)
+        }
     }
 
     private var floatingTabs: some View {
@@ -101,7 +146,8 @@ struct DashboardView: View {
         let days = store.visible
         let cs = cards(for: screen)
         let pad: CGFloat = 14, gap: CGFloat = 12
-        let statusH: CGFloat = 34
+        let hasStatus = store.errorMessage != nil || !store.warnings.isEmpty
+        let statusH: CGFloat = hasStatus ? 34 : -gap   // no status row: its gap disappears too
         @ViewBuilder func card(_ c: Card, _ h: CGFloat) -> some View {
             if c.bp {
                 BloodPressureCard(days: days, range: store.range, window: store.window, selected: $store.selected,
@@ -121,14 +167,15 @@ struct DashboardView: View {
                       selected: $store.selected, yIncludesZero: c.zero, emptyNote: c.note,
                       goal: c.goal, zones: c.zones,
                       yDomain: c.domain, footnote: c.footnote,
+                      showDate: c.nightDetail,
                       extra: (c.nightDetail && store.selected != nil) ? AnyView(NightDetailView(date: store.selected!, height: screen == .sleep ? 150 : 112)) : nil,
-                      stages: c.stages)
+                      dashedGrid: c.dashedGrid, majorGrid: c.majorGrid, stages: c.stages)
                 .frame(height: h)
             }
         }
         return ScrollView {
             VStack(spacing: gap) {
-                statusBar.frame(minHeight: statusH)
+                if hasStatus { statusBar.frame(minHeight: statusH) }
                 if landscape {
                     let avail = height - pad * 2 - statusH - gap - 8
                     let rowH = (avail - gap) / 2
@@ -165,19 +212,6 @@ struct DashboardView: View {
 
     @ViewBuilder private var statusBar: some View {
         @Bindable var store = store
-        HStack {
-            if let s = store.selected {
-                Image(systemName: "hand.tap.fill").foregroundStyle(.tint)
-                Text(s.formatted(.dateTime.weekday(.wide).day().month(.wide).year())).font(.headline)
-                Button("Clear") { withAnimation { store.selected = nil } }.buttonStyle(.bordered).controlSize(.small)
-            } else {
-                Image(systemName: "hand.tap").foregroundStyle(.secondary)
-                Text("Touch and hold a chart, then drag to inspect a day. Without a selection, values show the period average.")
-                    .font(.subheadline).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
-            }
-            Spacer()
-            if store.useDemo { Text("DEMO DATA").font(.caption.bold()).padding(5).background(.orange.opacity(0.2), in: Capsule()) }
-        }
         if let e = store.errorMessage {
             Label(e, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).frame(maxWidth: .infinity, alignment: .leading)
         } else if !store.warnings.isEmpty {
@@ -193,11 +227,27 @@ struct DashboardView: View {
         var zero = false; var note: String? = nil; var goal: Goal? = nil
         var zones: [Zone] = []; var footnote: String? = nil; var stages: [Series] = []; var nightDetail = false
         var bodyComp = false; var bp = false; var bpMap = false; var domain: ClosedRange<Double>? = nil
+        var dashedGrid: [Double] = []; var majorGrid: Double? = nil
     }
 
     private var bpNote: String {
         store.useHealthKit ? "No blood pressure readings in Apple Health for this period."
                            : "Garmin's Personal API has no blood pressure data. Connect Apple Health in Settings."
+    }
+
+    /// Resting heart rate axis starts at 45 bpm (it only goes lower if the data does), top rounded up to the next 5.
+    private var rhrDomain: ClosedRange<Double>? {
+        let v = store.visible.flatMap { [$0[.rhr], $0[.rhrAvg]] }.compactMap { $0 }
+        guard let mn = v.min(), let mx = v.max() else { return nil }
+        let lo = min(45, (mn / 5).rounded(.down) * 5)
+        let hi = max(lo + 10, ((mx + 1) / 5).rounded(.up) * 5)
+        return lo...hi
+    }
+
+    /// Thin dashed lines on every odd bpm value (47, 49, 51 …); the fat marker line is at 50.
+    private var rhrOddLines: [Double] {
+        guard let d = rhrDomain else { return [] }
+        return stride(from: Int(d.lowerBound.rounded(.up)), through: Int(d.upperBound.rounded(.down)), by: 1).filter { $0 % 2 != 0 }.map(Double.init)
     }
 
     private var rhrSeries: [Series] {
@@ -226,7 +276,7 @@ struct DashboardView: View {
     private func cards(for s: Screen) -> [Card] {
         switch s {
         case .vitals: [
-            Card(title: "Resting heart rate", icon: "heart.fill", series: rhrSeries),
+            Card(title: "Resting heart rate", icon: "heart.fill", series: rhrSeries, domain: rhrDomain, dashedGrid: rhrOddLines, majorGrid: 50),
             sleepStageCard,
             Card(title: "Blood pressure", icon: "waveform.path.ecg", series: [], bp: true),
             Card(title: "Blood pressure map", icon: "scope", series: [], bpMap: true),
@@ -244,7 +294,7 @@ struct DashboardView: View {
         ]
         case .body: [
             Card(title: "Body composition", icon: "scalemass.fill", series: [], bodyComp: true),
-            Card(title: "Resting heart rate", icon: "heart.fill", series: rhrSeries),
+            Card(title: "Resting heart rate", icon: "heart.fill", series: rhrSeries, domain: rhrDomain, dashedGrid: rhrOddLines, majorGrid: 50),
             stressCard,
         ]
         }

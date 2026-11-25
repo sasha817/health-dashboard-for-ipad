@@ -137,3 +137,14 @@ extension TimeRange {
         }
     }
 }
+
+extension Date {
+    /// "Monday, 23-Nov-26"
+    var shortDayLabel: String {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("EEEE")
+        let wd = f.string(from: self)
+        f.dateFormat = "dd-MMM-yy"
+        return "\(wd), \(f.string(from: self))"
+    }
+}

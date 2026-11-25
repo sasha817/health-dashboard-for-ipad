@@ -40,7 +40,10 @@ struct ChartCard: View {
     var zones: [Zone] = []
     var yDomain: ClosedRange<Double>? = nil
     var footnote: String? = nil
+    var showDate = false              // show the selected day (with Clear) in the header
     var extra: AnyView? = nil         // e.g. the sleep timeline of the selected night, shown under the chart
+    var dashedGrid: [Double] = []     // extra thin dashed horizontal lines (replaces the automatic grid; labels every 5)
+    var majorGrid: Double? = nil      // one emphasised horizontal line
     var stages: [Series] = []        // stacked sleep stages (bottom → top); days without stage data fall back to `series` bars
 
     private var selectedPoint: DayPoint? { selected.flatMap { s in days.first { $0.date == s } } }
@@ -64,6 +67,11 @@ struct ChartCard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 14) {
                 Label(title, systemImage: icon).font(.headline)
+                if showDate, let sel = selected {
+                    Text(sel.shortDayLabel).font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 10).padding(.vertical, 3).background(Color.accentColor.opacity(0.18), in: Capsule())
+                    Button("Clear") { withAnimation { selected = nil } }.buttonStyle(.bordered).controlSize(.mini)
+                }
                 Spacer()
                 ForEach(headerSeries) { s in
                     let v = headerValue(s)
@@ -125,6 +133,13 @@ struct ChartCard: View {
                         .foregroundStyle(z.color.opacity(0.17))
                 }
             }
+            ForEach(dashedGrid, id: \.self) { v in
+                RuleMark(y: .value("Grid", v)).foregroundStyle(.secondary.opacity(0.45))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+            }
+            if let m = majorGrid {
+                RuleMark(y: .value("Marker", m)).foregroundStyle(.secondary.opacity(0.7)).lineStyle(StrokeStyle(lineWidth: 3.5))
+            }
             if let g = goal {
                 RuleMark(y: .value("Goal", g.value))
                     .foregroundStyle(g.color)
@@ -176,6 +191,12 @@ struct ChartCard: View {
         })
         .chartForegroundStyleScale(domain: stages.map { $0.field.label }, range: stages.map { $0.color })
         .chartLegend(.hidden)
+        .chartYAxis {
+            AxisMarks(values: dashedGrid.isEmpty ? AxisMarkValues.automatic : .stride(by: 5)) { _ in
+                if dashedGrid.isEmpty { AxisGridLine() }
+                AxisValueLabel()
+            }
+        }
         .chartXScale(domain: x0...x1)
         .chartXAxis {
             AxisMarks(values: .stride(by: comp, count: count)) { _ in
