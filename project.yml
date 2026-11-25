@@ -3,6 +3,9 @@ options:
   bundleIdPrefix: app.healthdash
   deploymentTarget:
     iOS: "17.0"
+configFiles:
+  Debug: Config/Base.xcconfig
+  Release: Config/Base.xcconfig
 settings:
   base:
     SWIFT_VERSION: "5.0"
