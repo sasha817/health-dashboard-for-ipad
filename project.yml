@@ -24,6 +24,7 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_FILE: Config/Info-extra.plist
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_CFBundleDisplayName: "Health Dashboard"
         INFOPLIST_KEY_NSHealthShareUsageDescription: "Shows your blood pressure readings from Apple Health next to your Garmin data. Read-only; nothing is uploaded."
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
