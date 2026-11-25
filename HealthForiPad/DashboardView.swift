@@ -103,7 +103,15 @@ struct DashboardView: View {
         let pad: CGFloat = 14, gap: CGFloat = 12
         let statusH: CGFloat = 34
         @ViewBuilder func card(_ c: Card, _ h: CGFloat) -> some View {
-            if c.bodyComp {
+            if c.bp {
+                BloodPressureCard(days: days, range: store.range, window: store.window, selected: $store.selected,
+                                  guideline: store.bpGuideline, emptyNote: bpNote)
+                    .frame(height: h)
+            } else if c.bpMap {
+                BloodPressureMapCard(days: days, readings: store.bpReadings, window: store.window, selected: $store.selected,
+                                     guideline: store.bpGuideline, emptyNote: bpNote)
+                    .frame(height: h)
+            } else if c.bodyComp {
                 BodyCompositionCard(days: days, range: store.range, window: store.window,
                                     selected: $store.selected, trendDays: store.effectiveRollingDays)
                     .frame(height: h)
@@ -112,7 +120,7 @@ struct DashboardView: View {
                       range: store.range, window: store.window,
                       selected: $store.selected, yIncludesZero: c.zero, emptyNote: c.note,
                       goal: c.goal, zones: c.zones,
-                      yDomain: c.domain ?? (c.zones.isEmpty ? nil : bpDomain(days)), footnote: c.footnote,
+                      yDomain: c.domain, footnote: c.footnote,
                       extra: (c.nightDetail && store.selected != nil) ? AnyView(NightDetailView(date: store.selected!, height: screen == .sleep ? 150 : 112)) : nil,
                       stages: c.stages)
                 .frame(height: h)
@@ -132,9 +140,11 @@ struct DashboardView: View {
                             HStack(spacing: gap) { card(cs[2], bottom); card(cs[3], bottom); card(cs[4], bottom) }
                         }
                     } else if cs.count >= 4 {
-                        VStack(spacing: gap) {
-                            HStack(spacing: gap) { card(cs[0], rowH); card(cs[1], rowH) }
-                            HStack(spacing: gap) { card(cs[2], rowH); card(cs[3], rowH) }
+                        // two columns: heart rate stays low so blood pressure gets the room; sleep and the map share the right
+                        let colH = avail - gap
+                        HStack(alignment: .top, spacing: gap) {
+                            VStack(spacing: gap) { card(cs[0], colH * 0.36); card(cs[2], colH * 0.64) }
+                            VStack(spacing: gap) { card(cs[1], colH * 0.5); card(cs[3], colH * 0.5) }
                         }
                     } else {
                         HStack(spacing: gap) {
@@ -182,13 +192,12 @@ struct DashboardView: View {
         let title: String; let icon: String; let series: [Series]
         var zero = false; var note: String? = nil; var goal: Goal? = nil
         var zones: [Zone] = []; var footnote: String? = nil; var stages: [Series] = []; var nightDetail = false
-        var bodyComp = false; var domain: ClosedRange<Double>? = nil
+        var bodyComp = false; var bp = false; var bpMap = false; var domain: ClosedRange<Double>? = nil
     }
 
-    private func bpDomain(_ days: [DayPoint]) -> ClosedRange<Double> {
-        let lo = days.compactMap { $0[.diastolic] }.min() ?? 70
-        let hi = days.compactMap { $0[.systolic] }.max() ?? 130
-        return min(60, (lo - 5).rounded(.down))...max(150, (hi + 5).rounded(.up))
+    private var bpNote: String {
+        store.useHealthKit ? "No blood pressure readings in Apple Health for this period."
+                           : "Garmin's Personal API has no blood pressure data. Connect Apple Health in Settings."
     }
 
     private var rhrSeries: [Series] {
@@ -219,11 +228,8 @@ struct DashboardView: View {
         case .vitals: [
             Card(title: "Resting heart rate", icon: "heart.fill", series: rhrSeries),
             sleepStageCard,
-            Card(title: "Blood pressure", icon: "waveform.path.ecg",
-                 series: [Series(field: .systolic, color: .purple, tag: "sys"), Series(field: .diastolic, color: .blue, tag: "dia")],
-                 note: store.useHealthKit ? "No blood pressure readings in Apple Health for this period." : "Garmin's Personal API has no blood pressure data. Connect Apple Health in Settings.",
-                 zones: store.bpGuideline.zones, footnote: store.bpGuideline.legend),
-            stressCard,
+            Card(title: "Blood pressure", icon: "waveform.path.ecg", series: [], bp: true),
+            Card(title: "Blood pressure map", icon: "scope", series: [], bpMap: true),
         ]
         case .sleep: [
             sleepStageCard,

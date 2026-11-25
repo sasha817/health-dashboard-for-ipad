@@ -1,11 +1,13 @@
 import Foundation
 
 enum Field: String, CaseIterable, Hashable, Sendable {
-    case rhr, rhrAvg, sleepStart, sleepEnd, awakeCount, deepLo, deepHi, lightLo, lightHi, remLo, remHi, spo2Avg, spo2Low, respAvg, sleepHR, sleepStress, bodyFat, muscleMass, weightTrend, fatMassTrend, leanMassTrend, muscleTrend, sleepHours, sleepScore, sleepDeep, sleepLight, sleepRem, sleepAwake, systolic, diastolic, weight, stress
+    case rhr, rhrAvg, sysMin, sysMax, diaMin, diaMax, sleepStart, sleepEnd, awakeCount, deepLo, deepHi, lightLo, lightHi, remLo, remHi, spo2Avg, spo2Low, respAvg, sleepHR, sleepStress, bodyFat, muscleMass, weightTrend, fatMassTrend, leanMassTrend, muscleTrend, sleepHours, sleepScore, sleepDeep, sleepLight, sleepRem, sleepAwake, systolic, diastolic, weight, stress
 
     var label: String {
         switch self {
         case .rhr: "Resting HR"
+        case .sysMin, .sysMax: "Systolic range"
+        case .diaMin, .diaMax: "Diastolic range"
         case .sleepStart: "Bedtime"
         case .sleepEnd: "Wake-up"
         case .awakeCount: "Awakenings"
@@ -43,7 +45,7 @@ enum Field: String, CaseIterable, Hashable, Sendable {
         case .muscleMass, .weightTrend, .fatMassTrend, .leanMassTrend, .muscleTrend: "kg"
         case .sleepHours, .sleepDeep, .sleepLight, .sleepRem, .sleepAwake: "h"
         case .sleepScore, .stress, .sleepStress: ""
-        case .systolic, .diastolic: "mmHg"
+        case .systolic, .diastolic, .sysMin, .sysMax, .diaMin, .diaMax: "mmHg"
         case .weight: "kg"
         }
     }
@@ -61,7 +63,7 @@ enum Field: String, CaseIterable, Hashable, Sendable {
         case .rhr: return String(format: "%.0f bpm", v)
         case .sleepStart, .sleepEnd, .awakeCount: return String(format: "%.0f", v)
         case .rhrAvg: return String(format: "%.1f bpm", v)
-        case .systolic, .diastolic: return String(format: "%.0f", v)
+        case .systolic, .diastolic, .sysMin, .sysMax, .diaMin, .diaMax: return String(format: "%.0f", v)
         case .sleepScore, .stress, .sleepStress: return String(format: "%.0f", v)
         }
     }
@@ -122,28 +124,16 @@ enum Cal {
     }
 }
 
-
-enum BPGuideline: String, CaseIterable, Identifiable {
-    case aha, esc
-    var id: String { rawValue }
-    var label: String { self == .aha ? "AHA / ACC 2017" : "ESC / ESH 2018" }
-    var legend: String {
+extension TimeRange {
+    /// X-axis tick spacing and label format for a range (shared by all charts).
+    var axisStride: (Calendar.Component, Int, Date.FormatStyle) {
         switch self {
-        case .aha: "Zones (AHA): green normal · yellow elevated · orange stage 1 · red stage 2"
-        case .esc: "Zones (ESC): green optimal/normal · yellow high-normal · orange grade 1 · red grade 2–3"
-        }
-    }
-    /// Diastolic limits are drawn between 0–100 mmHg, systolic limits above 100, so one axis can carry both.
-    var zones: [Zone] {
-        switch self {
-        case .aha: [
-            Zone(from: 0, to: 80, color: .green), Zone(from: 80, to: 90, color: .orange), Zone(from: 90, to: 100, color: .red),
-            Zone(from: 100, to: 120, color: .green), Zone(from: 120, to: 130, color: .yellow),
-            Zone(from: 130, to: 140, color: .orange), Zone(from: 140, to: 400, color: .red)]
-        case .esc: [
-            Zone(from: 0, to: 85, color: .green), Zone(from: 85, to: 90, color: .yellow), Zone(from: 90, to: 100, color: .orange),
-            Zone(from: 100, to: 130, color: .green), Zone(from: 130, to: 140, color: .yellow),
-            Zone(from: 140, to: 160, color: .orange), Zone(from: 160, to: 400, color: .red)]
+        case .week: (.day, 1, .dateTime.weekday(.abbreviated))
+        case .month: (.day, 7, .dateTime.day().month(.abbreviated))
+        case .quarter: (.day, 14, .dateTime.day().month(.abbreviated))
+        case .half: (.month, 1, .dateTime.month(.abbreviated))
+        case .year: (.month, 2, .dateTime.month(.abbreviated))
+        case .twoYears: (.month, 4, .dateTime.month(.abbreviated).year(.twoDigits))
         }
     }
 }

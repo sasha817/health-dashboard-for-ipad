@@ -16,6 +16,8 @@ final class DashboardStore {
     var backfillProgress: Double?          // non-nil while a history download runs
     var backfillMessage: String?
     var cacheSummary = "Nothing cached yet"
+    /// Individual blood-pressure measurements in the current range (Apple Health; never cached on disk).
+    var bpReadings: [BPReading] = []
 
     // MARK: settings (persisted in UserDefaults)
     var useDemo: Bool = UserDefaults.standard.bool(forKey: "useDemo") {
@@ -155,12 +157,14 @@ final class DashboardStore {
 
     func disableHealthKit() {
         useHealthKit = false
-        for (d, var p) in days { p.values[.systolic] = nil; p.values[.diastolic] = nil; days[d] = p }
+        bpReadings = []
+        for (d, var p) in days { for f in [Field.systolic, .diastolic, .sysMin, .sysMax, .diaMin, .diaMax] { p.values[f] = nil }; days[d] = p }
     }
 
     func mergeHealthKit() async {
         guard useHealthKit, HealthKitBP.available else { return }
         let w = window
+        bpReadings = await HealthKitBP.readings(from: w.start, to: w.end)
         let series = await HealthKitBP.fetch(from: w.start, to: w.end)
         for (date, vals) in series {
             var p = days[date] ?? DayPoint(date: date)
@@ -221,7 +225,7 @@ final class DashboardStore {
     func keyChanged() { client = nil; clientKey = nil; errorMessage = nil }
 
     /// Demo mode toggled: drop what's in memory; the cache is re-read from disk on the next load.
-    func switchedDemo() { generation += 1; backfillTask?.cancel(); days = [:]; selected = nil; cacheLoaded = false; coveredStart = nil; coveredEnd = nil; lastRefresh = nil; errorMessage = nil; updateSummary() }
+    func switchedDemo() { generation += 1; backfillTask?.cancel(); days = [:]; bpReadings = []; selected = nil; cacheLoaded = false; coveredStart = nil; coveredEnd = nil; lastRefresh = nil; errorMessage = nil; updateSummary() }
 
     // MARK: loading
     /// Loads what the current range needs. Cached days are shown instantly; only missing or stale days are fetched.
@@ -243,6 +247,7 @@ final class DashboardStore {
         errorMessage = nil
         if useDemo {
             days = Demo.generate(); coveredStart = nil
+            bpReadings = Demo.readings(from: days)
             await mergeHealthKit()
             return
         }

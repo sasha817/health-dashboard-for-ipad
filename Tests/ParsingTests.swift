@@ -86,4 +86,35 @@ final class ParsingTests: XCTestCase {
         XCTAssertEqual(c.resolvedDate.map(Cal.iso), "2026-05-01")
         XCTAssertNotNil(CachedDay(day: nil, date: legacyAbsolute, values: [:]).resolvedDate)   // old caches still load
     }
+
+    // MARK: blood-pressure categories (worse of systolic / diastolic)
+
+    func testAHACategories() {
+        let g = BPGuideline.aha
+        XCTAssertEqual(g.category(sys: 119, dia: 79), 0)
+        XCTAssertEqual(g.category(sys: 125, dia: 70), 1)     // elevated: systolic 120–129 only
+        XCTAssertEqual(g.category(sys: 118, dia: 85), 2)     // diastolic 80–89 is stage 1 (AHA has no "elevated" for diastolic)
+        XCTAssertEqual(g.category(sys: 110, dia: 92), 3)
+        XCTAssertEqual(g.category(sys: 150, dia: 70), 3)
+        XCTAssertEqual(g.diaCategory(102), 3)                // the case a shared axis got wrong (it looked green)
+    }
+
+    func testESCCategories() {
+        let g = BPGuideline.esc
+        XCTAssertEqual(g.category(sys: 125, dia: 80), 0)
+        XCTAssertEqual(g.category(sys: 135, dia: 70), 1)
+        XCTAssertEqual(g.category(sys: 150, dia: 95), 2)
+        XCTAssertEqual(g.category(sys: 165, dia: 60), 3)
+        XCTAssertEqual(g.diaCategory(87), 1)
+    }
+
+    func testZoneBandsCoverTheAxisWithoutGaps() {
+        for g in BPGuideline.allCases {
+            for zones in [g.sysZones, g.diaZones] {
+                XCTAssertEqual(zones.first?.from, 0)
+                for (a, b) in zip(zones, zones.dropFirst()) { XCTAssertEqual(a.to, b.from) }
+                XCTAssertGreaterThanOrEqual(zones.last?.to ?? 0, 400)
+            }
+        }
+    }
 }

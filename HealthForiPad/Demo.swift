@@ -42,9 +42,28 @@ enum Demo {
             if i % 3 != 2 {
                 p.values[.systolic] = 128 + 9 * sin(t / 11) + 4 * sin(t * 2.1)
                 p.values[.diastolic] = 82 + 6 * sin(t / 11 + 1) + 2 * sin(t * 1.9)
+                let spreadS = 5 + 4 * abs(sin(t * 1.3)), spreadD = 3 + 3 * abs(sin(t * 0.7))
+                p.values[.sysMin] = p.values[.systolic]! - spreadS; p.values[.sysMax] = p.values[.systolic]! + spreadS * 1.3
+                p.values[.diaMin] = p.values[.diastolic]! - spreadD; p.values[.diaMax] = p.values[.diastolic]! + spreadD * 1.3
             }
             _ = noise
             out[d] = p
+        }
+        return out
+    }
+
+    /// Individual readings for demo mode: 1–3 per day (morning / noon / evening) scattered around that day's average.
+    static func readings(from days: [Date: DayPoint]) -> [BPReading] {
+        var out: [BPReading] = []
+        for p in days.values.sorted(by: { $0.date < $1.date }) {
+            guard let s = p[.systolic], let d = p[.diastolic] else { continue }
+            let n = 1 + (Int(p.date.timeIntervalSince1970 / 86400) % 3)
+            for k in 0..<n {
+                let jitterS = [-6.0, 2.0, 7.0][k] , jitterD = [-3.0, 1.0, 4.0][k]
+                let hour = [7.5, 13.0, 20.25][k]
+                let time = Cal.cal.startOfDay(for: p.date).addingTimeInterval(hour * 3600)
+                out.append(BPReading(time: time, sys: s + jitterS, dia: d + jitterD))
+            }
         }
         return out
     }

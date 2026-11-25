@@ -58,16 +58,7 @@ struct ChartCard: View {
         return v.isEmpty ? nil : v.reduce(0, +) / Double(v.count)
     }
 
-    private var axisStride: (Calendar.Component, Int, Date.FormatStyle) {
-        switch range {
-        case .week: (.day, 1, .dateTime.weekday(.abbreviated))
-        case .month: (.day, 7, .dateTime.day().month(.abbreviated))
-        case .quarter: (.day, 14, .dateTime.day().month(.abbreviated))
-        case .half: (.month, 1, .dateTime.month(.abbreviated))
-        case .year: (.month, 2, .dateTime.month(.abbreviated))
-        case .twoYears: (.month, 4, .dateTime.month(.abbreviated).year(.twoDigits))
-        }
-    }
+    private var axisStride: (Calendar.Component, Int, Date.FormatStyle) { range.axisStride }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
