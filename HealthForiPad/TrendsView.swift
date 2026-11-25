@@ -64,11 +64,10 @@ struct TrendsView: View {
             let gap: CGFloat = 12
             let h = geo.size.height - 28
             if geo.size.width > geo.size.height {
-                HStack(spacing: gap) {
-                    longTermCard.frame(width: (geo.size.width - 32 - gap) * 0.58)
-                    yearCard.frame(maxWidth: .infinity)
+                VStack(spacing: gap) {
+                    longTermCard.frame(height: (h - gap) * 0.58)
+                    yearCard.frame(height: (h - gap) * 0.42)
                 }
-                .frame(height: h)
                 .padding(.horizontal, 16).padding(.vertical, 14)
             } else {
                 ScrollView {
