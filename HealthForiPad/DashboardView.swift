@@ -4,12 +4,14 @@ enum Screen: String, CaseIterable, Identifiable {
     case vitals = "Vitals"
     case sleep = "Sleep"
     case body = "Body"
+    case trends = "Trends"
     var id: String { rawValue }
     var icon: String {
         switch self {
         case .vitals: "heart.text.square"
         case .sleep: "moon.zzz.fill"
         case .body: "scalemass"
+        case .trends: "chart.line.uptrend.xyaxis"
         }
     }
 }
@@ -84,7 +86,7 @@ struct DashboardView: View {
             }
             Spacer()
             if store.useDemo { Text("DEMO").font(.caption2.bold()).padding(4).background(.orange.opacity(0.25), in: Capsule()) }
-            VStack(spacing: 4) {
+            if screen != .trends { VStack(spacing: 4) {
                 ForEach(store.availableRanges) { r in
                     Button { store.setRange(r) } label: {
                         Text(r.short).font(.subheadline.weight(.semibold))
@@ -93,7 +95,7 @@ struct DashboardView: View {
                             .background(store.range == r ? Color.accentColor : Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
                     }.buttonStyle(.plain)
                 }
-            }
+            } }
             if store.isLoading || store.backfillProgress != nil { ProgressView() }
             HStack(spacing: 4) {
                 Button { Task { await store.load(manual: true) } } label: { Image(systemName: "arrow.clockwise").frame(width: 36, height: 36) }
@@ -141,7 +143,11 @@ struct DashboardView: View {
 
     // MARK: content
 
-    private func content(width: CGFloat, height: CGFloat, landscape: Bool) -> some View {
+    @ViewBuilder private func content(width: CGFloat, height: CGFloat, landscape: Bool) -> some View {
+        if screen == .trends { TrendsView() } else { dashboard(width: width, height: height, landscape: landscape) }
+    }
+
+    private func dashboard(width: CGFloat, height: CGFloat, landscape: Bool) -> some View {
         @Bindable var store = store
         let days = store.visible
         let cs = cards(for: screen)
@@ -292,6 +298,7 @@ struct DashboardView: View {
             Card(title: "HR/stress", icon: "waveform.path.ecg.rectangle",
                  series: [Series(field: .sleepHR, color: .red, tag: "HR"), Series(field: .sleepStress, color: .orange, tag: "stress")]),
         ]
+        case .trends: []
         case .body: [
             Card(title: "Body composition", icon: "scalemass.fill", series: [], bodyComp: true),
             Card(title: "Resting heart rate", icon: "heart.fill", series: rhrSeries, domain: rhrDomain, dashedGrid: rhrOddLines, majorGrid: 50),
